@@ -6,10 +6,17 @@ Module for feature engineering.
 import numpy as np
 import pandas as pd
 
+import torch
 import textstat
 
 from rouge import Rouge
+from typing import Dict
+
+from nltk.util import ngrams
+from nltk import word_tokenize
 from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
+
+from sentence_transformers import SentenceTransformer, util
 
 
 class FeatureEngineering:
@@ -24,7 +31,9 @@ class FeatureEngineering:
         """
         pass
 
-    def fe_pipeline(self, data: pd.DataFrame, method: str) -> pd.DataFrame:
+    def fe_pipeline(
+        self, data: pd.DataFrame, method: str, encoder: SentenceTransformer
+    ) -> pd.DataFrame:
         """
         Feature engineering pipeline.
 
@@ -34,18 +43,21 @@ class FeatureEngineering:
         # 1. Add reference summary
         df = self.add_ref_summary(df, method)
 
-        # 2. Word-overlap Metrics (WOMs)
-        # 2.1. Add ROUGE score metrics
+        # 2. Word-overlap Metrics (WOMs): ROUGE score metrics
         df = self.add_rouge_scores(df, method)
 
-        # 2.2. Add BLEU score metric (SmoothingFunction - method1)
+        # 3. Word-overlap Metrics (WOMs): BLEU score metric (SmoothingFunction - method1)
         df = self.add_bleu_scores(df, method)
 
-        # 3. Grammar-based metrics (GBMs):
-        # 3.1. Add readability metrics
+        # 3. Grammar-based score metrics (GBSMs):
+        # 3.1. Add readability score metrics
         df = self.add_readability_scores(df, method)
 
-        # 4.Intrinsic evaluation metrics
+        # 4.Intrinsic evaluation score metrics
+        df = self.add_reference_free_scores(df, method)
+
+        # 5. Sentence-Transformers score metrics
+        df = self.add_textual_similarity_scores(df, method, encoder)
 
         return df
 
@@ -115,6 +127,138 @@ class FeatureEngineering:
                     .apply(self.compute_readability_scores)
                     .apply(pd.Series)
                     .add_prefix("m_"),
+                ],
+                axis=1,
+            )
+        else:
+            raise ValueError("Wrong type.")
+
+        return df
+
+    def add_reference_free_scores(
+        self, data: pd.DataFrame, method: str
+    ) -> pd.DataFrame:
+        """
+        Add REFERENCE FREE METRIC scores.
+
+        """
+        df = data.copy()
+
+        if method == "comparisons":
+            df = pd.concat(
+                [
+                    df,
+                    df.apply(
+                        lambda row: self.compute_reference_free_scores(
+                            row["text"], row["summary_0"]
+                        ),
+                        axis=1,
+                    )
+                    .apply(pd.Series)
+                    .add_prefix("m0_"),
+                    df.apply(
+                        lambda row: self.compute_reference_free_scores(
+                            row["text"], row["summary_1"]
+                        ),
+                        axis=1,
+                    )
+                    .apply(pd.Series)
+                    .add_prefix("m1_"),
+                ],
+                axis=1,
+            )
+        elif method == "axis":
+            df = pd.concat(
+                [
+                    df,
+                    df.apply(
+                        lambda row: self.compute_reference_free_scores(
+                            row["text"], row["summary"]
+                        ),
+                        axis=1,
+                    )
+                    .apply(pd.Series)
+                    .add_prefix("m_"),
+                ],
+                axis=1,
+            )
+        else:
+            raise ValueError("Wrong type.")
+
+        return df
+
+    def add_textual_similarity_scores(
+        self, data: pd.DataFrame, method: str, encoder: SentenceTransformer,
+    ) -> pd.DataFrame:
+        """
+        Add REFERENCE FREE METRIC scores.
+
+        """
+        df = data.copy()
+
+        # Text embeddings
+        text_encoded = self.compute_sentence_embeddigns(df["text"], encoder)
+
+        # Summary ref embeddings. First dropna.
+        f_ref = df["ref_summary"].dropna()
+        ref_encoded = self.compute_sentence_embeddigns(f_ref.tolist(), encoder)
+
+        if method == "comparisons":
+
+            # Method embeddings
+            summary_0_encoded = self.compute_sentence_embeddigns(
+                df["summary_0"], encoder
+            )
+            summary_1_encoded = self.compute_sentence_embeddigns(
+                df["summary_1"], encoder
+            )
+
+            # Concat
+            df = pd.concat(
+                [
+                    df,
+                    self.compute_textual_similarity_scores(
+                        text_encoded, summary_0_encoded, "text", "summary"
+                    ).add_prefix("m0_"),
+                    self.compute_textual_similarity_scores(
+                        text_encoded, summary_1_encoded, "text", "summary"
+                    ).add_prefix("m1_"),
+                    self.compute_textual_similarity_scores(
+                        ref_encoded,
+                        summary_0_encoded[f_ref.index],
+                        "ref",
+                        "summary",
+                        f_ref.index,
+                    ).add_prefix("m0_"),
+                    self.compute_textual_similarity_scores(
+                        ref_encoded,
+                        summary_1_encoded[f_ref.index],
+                        "ref",
+                        "summary",
+                        f_ref.index,
+                    ).add_prefix("m1_"),
+                ],
+                axis=1,
+            )
+        elif method == "axis":
+
+            # Method embeddings
+            summary_encoded = self.compute_sentence_embeddigns(df["summary"], encoder)
+
+            # Concat
+            df = pd.concat(
+                [
+                    df,
+                    self.compute_textual_similarity_scores(
+                        text_encoded, summary_encoded, "text", "summary"
+                    ).add_prefix("m_"),
+                    self.compute_textual_similarity_scores(
+                        ref_encoded,
+                        summary_encoded[f_ref.index],
+                        "ref",
+                        "summary",
+                        f_ref.index,
+                    ).add_prefix("m_"),
                 ],
                 axis=1,
             )
@@ -246,7 +390,7 @@ class FeatureEngineering:
         return df.fillna(value=np.nan)
 
     @staticmethod
-    def compute_readability_scores(text: str):
+    def compute_readability_scores(text: str) -> Dict:
         """
         Compute READABILITY score. Readability quantifies the difficulty with 
         which a reader understands a text. The following measures are calculated:
@@ -278,4 +422,86 @@ class FeatureEngineering:
             "polysyllab_count": textstat.polysyllabcount(text),
             "monosyllab_count": textstat.monosyllabcount(text),
         }
+
+    @staticmethod
+    def compute_reference_free_scores(text: str, summary: str) -> Dict:
+        """
+        Compute reference-free metrics.
+        
+        """
+
+        def compression_ratio() -> float:
+            """
+            Compression Ratio. How much the algorithm has condensed the original 
+            text.
+            
+            """
+            return len(summary) / len(text)
+
+        def jaccard_similarity(n_grams) -> float:
+            """
+            Jaccard Similarity: Jaccard Similarity is a measure of the similarity 
+            between two sets. It is calculated as the size of the intersection of 
+            the sets divided by the size of their union. This metric measures the 
+            overlap of words (tokens) between the input text and the generated 
+            summary. A higher Jaccard Similarity indicates a larger degree of 
+            shared words between the input and the summary. However, this metric 
+            might not capture the quality of the summary, especially if the 
+            algorithm rephrases or paraphrases the content.
+            
+            """
+
+            # Tokens
+            input_tokens = word_tokenize(text)
+            summary_tokens = word_tokenize(summary)
+
+            if n_grams > 1:
+                input_set = set(ngrams(input_tokens, n_grams))
+                summary_set = set(ngrams(summary_tokens, n_grams))
+            else:
+                input_set = set(input_tokens)
+                summary_set = set(summary_tokens)
+
+            # Intersection and union
+            intersection = input_set.intersection(summary_set)
+            union = input_set.union(summary_set)
+
+            return len(intersection) / len(union)
+
+        return {
+            "compression_ratio": compression_ratio(),
+            "jaccard_similarity_1": jaccard_similarity(n_grams=1),
+            "jaccard_similarity_2": jaccard_similarity(n_grams=2),
+        }
+
+    @staticmethod
+    def compute_textual_similarity_scores(
+        a: torch.Tensor, b: torch.Tensor, a_name: str, b_name: str, ref_index=None
+    ) -> pd.Series:
+        """
+        Compute the textual similarity between 2 text embeddings. This similarity is 
+        measured as cosine similarity.
+
+        """
+
+        # Compute cosine-similarits
+        cosine_scores = util.cos_sim(a, b)
+
+        return pd.DataFrame(
+            cosine_scores.diagonal().cpu().data.numpy(),
+            index=ref_index,
+            columns=[f"{a_name}_{b_name}_xfmr_similarity"],
+        )
+
+    @staticmethod
+    def compute_sentence_embeddigns(
+        text: pd.Series, model: SentenceTransformer
+    ) -> torch.Tensor:
+        """
+        Compute sentence embeddings.
+        
+        """
+        return model.encode(
+            text, batch_size=64, convert_to_tensor=True, show_progress_bar=True
+        )
 
