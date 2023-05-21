@@ -484,11 +484,21 @@ class FeatureEngineering:
 
         """
 
-        # Compute cosine-similarits
-        cosine_scores = util.cos_sim(a, b)
+        if a.shape != b.shape:
+            raise ValueError("Check torch shapes.")
+
+        # Normalize the tensors
+        a_norm = torch.nn.functional.normalize(a, p=2, dim=-1)
+        b_norm = torch.nn.functional.normalize(b, p=2, dim=-1)
+
+        # Compute the element-wise product of the normalized tensors and sum over the last dimension
+        cosine_scores = torch.sum(a_norm * b_norm, dim=-1)
+
+        # Move the tensor to the CPU and convert it to a numpy array
+        cosine_scores = cosine_scores.cpu().numpy()
 
         return pd.DataFrame(
-            cosine_scores.diagonal().cpu().data.numpy(),
+            cosine_scores,
             index=ref_index,
             columns=[f"{a_name}_{b_name}_xfmr_similarity"],
         )
