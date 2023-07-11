@@ -3,8 +3,12 @@ Utils.
 
 """
 
+from typing import Tuple
+
 import numpy as np
 import pandas as pd
+
+SEED = 108
 
 
 def reduceMemory(df):
@@ -66,3 +70,51 @@ def reduceMemory(df):
     )
 
     return df
+
+
+def train_test_split_comparision(
+    df: pd.DataFrame, train_size: float
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Splits a DataFrame into a training set and a testing set based on the text 
+    column. All records with the same text will be put into the same set.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame to split.
+    train_size : float
+        Proportion of the data to include in the train split 
+        (0 < train_size < 1).
+
+    Returns
+    -------
+    train_df : pd.DataFrame
+        Training set DataFrame.
+    test_df : pd.DataFrame
+        Testing set DataFrame.
+    """
+
+    # Ensure valid train_size
+    if not 0 < train_size < 1:
+        raise ValueError("train_size must be between 0 and 1")
+
+    # Create a list with unique texts
+    texts = df["text"].unique()
+
+    # Shuffle the list of unique texts
+    np.random.seed(SEED)
+    np.random.shuffle(texts)
+
+    # Define the index to split
+    split_index = int(len(texts) * train_size)
+
+    # Split the texts into train and test
+    train_texts = texts[:split_index]
+    test_texts = texts[split_index:]
+
+    # Use the split texts to split the dataframe
+    train_df = df[df["text"].isin(train_texts)].reset_index(drop=True)
+    test_df = df[df["text"].isin(test_texts)].reset_index(drop=True)
+
+    return train_df, test_df

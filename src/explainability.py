@@ -8,9 +8,12 @@ import optuna
 import numpy as np
 import pandas as pd
 import xgboost as xgb
+from sklearn import metrics
 
-from src.utils import reduceMemory
 from src.models import OptunaObjective
+from src.utils import reduceMemory, train_test_split_comparision
+
+SEED = 108
 
 
 class ExplainSumm:
@@ -21,8 +24,7 @@ class ExplainSumm:
 
     def __init__(
         self,
-        train: pd.DataFrame,
-        test: pd.DataFrame,
+        df: pd.DataFrame,
         target: list,
         non_features: list,
         n_trials: int = 50,
@@ -32,12 +34,14 @@ class ExplainSumm:
         Initialize the ExplainSumm class.
 
         """
-        self.train = reduceMemory(train)
-        self.test = reduceMemory(test)
+        self.df = reduceMemory(df)
         self.target = target
         self.non_features = non_features
         self.n_trials = n_trials
         self.n_boost_round: int = n_boost_round
+
+        self.train = None
+        self.test = None
 
         self.X_train = None
         self.y_train = None
@@ -52,7 +56,9 @@ class ExplainSumm:
         self.best_params = None
 
         self.model = None
+        self.metrics = None
         self.test_pred = None
+        self.test_pred_prob = None
 
         self.main()
 
@@ -62,11 +68,14 @@ class ExplainSumm:
 
         """
 
+        # Train and test
+        self.train, self.test = train_test_split_comparision(self.df, train_size=0.75)
+
         # Generate comparisons features
         self.generate_spread_drift_features()
 
-        # Generate batch folds
-        self.batch_folds()
+        # Generate unique text folds
+        self.text_folds(n_folds=5)
 
         # Custom CV train
         self.xgb_optuna_batch_CV()
@@ -139,23 +148,29 @@ class ExplainSumm:
 
         return df
 
-    def batch_folds(self):
+    def text_folds(self, n_folds: int):
         """
-        Create custom folds attending to the batch features.
-
+        Create custom folds attending to the text features.
         """
 
         self.customFolds = []
 
-        # Get unique batchs
-        unique_batchs = self.train["batch"].unique()
+        # Get unique texts
+        unique_texts = self.train["text"].unique()
 
-        # Train, test index batch kfolds
-        for batch in unique_batchs:
+        # Shuffle the unique texts
+        np.random.seed(SEED)
+        np.random.shuffle(unique_texts)
+
+        # Divide unique_texts into n_folds subsets
+        text_subsets = np.array_split(unique_texts, n_folds)
+
+        # Train, test index text kfolds
+        for subset in text_subsets:
             self.customFolds.append(
                 (
-                    self.train[self.train["batch"] != batch].index.to_list(),
-                    self.train[self.train["batch"] == batch].index.to_list(),
+                    self.train[~self.train["text"].isin(subset)].index.to_list(),
+                    self.train[self.train["text"].isin(subset)].index.to_list(),
                 )
             )
 
@@ -208,4 +223,39 @@ class ExplainSumm:
 
         # Generate predictions
         print("Generating predictions...")
-        self.test_pred = self.model.predict(self.xgtest)
+        self.test_pred_prob = self.model.predict(self.xgtest)
+        self.test_pred = (self.test_pred_prob > 0.5).astype(int)
+
+        # Metrics
+        print("Calculate classification metrics...")
+        self.metrics = self.calculate_metrics(self.y_test, self.test_pred)
+
+    @staticmethod
+    def calculate_metrics(y_true, y_pred):
+        """
+        Calculate classification metrics based on true and predicted values.
+
+        Parameters:
+        y_true : array-like of shape (n_samples,)
+            Ground truth (correct) target values.
+        y_pred : array-like of shape (n_samples,)
+            Estimated targets as returned by a classifier.
+
+        Returns:
+        A dictionary of various classification metrics.
+
+        """
+
+        results = {
+            "Accuracy": metrics.accuracy_score(y_true, y_pred),
+            "Precision": metrics.precision_score(y_true, y_pred),
+            "Recall": metrics.recall_score(y_true, y_pred),
+            "F1 Score": metrics.f1_score(y_true, y_pred),
+            "ROC AUC": metrics.roc_auc_score(y_true, y_pred),
+        }
+
+        # Confusion Matrix
+        cm = metrics.confusion_matrix(y_true, y_pred)
+        results["Confusion Matrix"] = cm
+
+        return results
