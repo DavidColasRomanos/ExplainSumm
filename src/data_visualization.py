@@ -154,3 +154,63 @@ def plot_metrics_by_algorithm_and_complexity(eval_summ_metrics, metrics):
     plt.tight_layout()
     plt.show()
 
+
+def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
+    """
+    Creates a figure with line plots to visualize each of the given metrics for 
+    various summarization algorithms and complexities specified by the fraction 
+    preferred to ref. The plots are arranged in a grid with 3 columns.
+
+    Parameters:
+    eval_summ_metrics : EvalSummMetrics
+        EvalSummMetrics instance containing calculated metrics.
+    metrics : list
+        List of metrics to be plotted.
+
+    Returns:
+    None. The function directly creates a plot using matplotlib and seaborn.
+
+    """
+
+    # Number of metrics
+    n_metrics = len(metrics)
+
+    # Calculate the number of rows for the subplot grid
+    n_rows = (n_metrics + 2) // 3  # '+2' ensures we round up
+
+    # Figure and axes
+    fig, axs = plt.subplots(n_rows, 3, figsize=(22, 6 * n_rows))
+
+    # Flatten the axs array for easy iteration
+    axs = axs.flatten()
+
+    # Sets
+    sns.set_palette(sns.color_palette("tab10"))
+    sns.set_style("darkgrid")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+
+    # Plot each metric
+    for ax, metric in zip(axs, metrics):
+        # Line plot
+        sns.lineplot(
+            data=eval_summ_metrics.metrics_df,
+            x="Fraction preferred to ref",
+            y=metric,
+            linestyle=":",
+            marker="o",
+            markersize=7.5,
+            markers=True,
+            dashes=True,
+            ax=ax,
+        )
+
+        ax.set_ylabel(metric)
+        ax.set_xlabel("Fraction preferred to ref")
+
+    # If there are fewer metrics than subplots, remove the extra subplots
+    for ax in axs[n_metrics:]:
+        ax.remove()
+
+    plt.tight_layout()
+    plt.show()
+

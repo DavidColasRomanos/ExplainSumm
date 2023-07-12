@@ -35,6 +35,8 @@ class EvalSummMetrics:
         self.fraction_preferred_to_ref = None
         self.metrics = None
         self.metrics_df = None
+        self.policy_classification = None
+        self.comparisons_segmentation = None
 
         self.main()
 
@@ -68,7 +70,13 @@ class EvalSummMetrics:
         # 8. Classify model quality
         self.classify_model_quality()
 
-        # 9. Save DataFrame to csv
+        # 9. Classify policies
+        self.classify_policies()
+
+        # 10. Comparisons segmentation
+        self.comparisons_quality_segmentation()
+
+        # 11. Save DataFrame to csv
         self.save_dataframe_to_csv()
 
     def load_data(self):
@@ -167,6 +175,7 @@ class EvalSummMetrics:
                         {
                             "Model": [policy_type],
                             "Parameters (B)": [float(parameters.replace("B", ""))],
+                            "n": len(group),
                             "Fraction preferred to ref": [fraction_preferred_to_ref],
                         }
                     ),
@@ -224,6 +233,11 @@ class EvalSummMetrics:
                 [self.metrics_df, pd.DataFrame(m_dict)], ignore_index=True,
             )
 
+        # Add preferred_to_ref and n
+        self.metrics_df = self.metrics_df.merge(
+            self.fraction_preferred_to_ref, how="left", on=["Model", "Parameters (B)"]
+        )
+
     def classify_model_quality(self):
         """
         Classify models into 'Low', 'Medium', or 'High' quality based on 
@@ -252,14 +266,73 @@ class EvalSummMetrics:
             labels=labels,
         )
 
-    def save_dataframe_to_csv(self, filename="data/policy_eval.csv"):
+    def classify_policies(self):
         """
-        Save 'fraction_preferred_to_ref' DataFrame to a csv file.
+        Classify policies attending to the model classification.
+        
+        """
+
+        # Load and transform policies
+        policy_data = self.policies.copy()
+        policy_data["Parameters"] = policy_data["Parameters"].apply(
+            lambda x: float(x.replace("B", ""))
+        )
+
+        # Classify policies
+        self.policy_classification = (
+            policy_data.reset_index()
+            .merge(
+                self.fraction_preferred_to_ref,
+                left_on=["Policy Type", "Parameters"],
+                right_on=["Model", "Parameters (B)"],
+                how="left",
+            )
+            .drop(columns=["Model", "Parameters (B)"])
+            .rename(columns={"index": "Policy", "Parameters": "Parameters (B)"})
+        )
+
+    def comparisons_quality_segmentation(self):
+        """
+        Sample segmentation with attention to the quality of summarization 
+        algorithms driven by the fraction preferred over the reference 
+        calculation.
+
+        """
+
+        for i, quality in enumerate(["Low", "Medium", "High"]):
+
+            # Mask
+            mask = self.df["policy_0"].isin(
+                self.policy_classification.loc[
+                    self.policy_classification["Quality"] == quality, "Policy"
+                ]
+            ) & self.df["policy_1"].isin(
+                self.policy_classification.loc[
+                    self.policy_classification["Quality"] == quality, "Policy"
+                ]
+            )
+
+            # Segmentation
+            segmentation = self.df.loc[mask].copy()
+            segmentation["Quality"] = quality
+
+            if i == 0:
+                self.comparisons_segmentation = segmentation
+            else:
+                self.comparisons_segmentation = pd.concat(
+                    [self.comparisons_segmentation, segmentation]
+                )
+
+    def save_dataframe_to_csv(
+        self, filename="data/segmentation/comparisons_segmentation.csv"
+    ):
+        """
+        Save 'comparisons_segmentation' DataFrame to a csv file.
 
         Parameters:
         filename : str 
-            The name of the file to save. Defaults to 'fraction_preferred_to_ref.csv'.
+            The name of the file to save. Defaults to 'comparisons_segmentation.csv'.
 
         """
 
-        self.fraction_preferred_to_ref.to_csv(filename, index=False)
+        self.comparisons_segmentation.to_csv(filename, index=False)
