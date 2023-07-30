@@ -93,6 +93,8 @@ class EvalSummMetrics:
             ignore_index=True,
         )
 
+        self.df.columns = self.df.columns.str.replace("xfmr", "sentence")
+
     def load_policies(self):
         """
         Load policies.
@@ -198,9 +200,8 @@ class EvalSummMetrics:
             "bleu",
             "jaccard_similarity_1",
             "jaccard_similarity_2",
-            "flesch_reading_ease",
-            "text_summary_xfmr_similarity",
-            "ref_summary_xfmr_similarity",
+            "text_summary_sentence_similarity",
+            "ref_summary_sentence_similarity",
         ]
 
         # Initialize DataFrame

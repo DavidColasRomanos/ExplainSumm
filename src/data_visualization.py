@@ -3,6 +3,8 @@ Data visualization module.
 
 """
 
+import os
+import scipy.stats
 import pandas as pd
 
 import matplotlib.pyplot as plt
@@ -39,7 +41,7 @@ def visualize_metrics(metrics_dict):
     plt.show()
 
 
-def plot_fraction_preferred_to_ref(df: pd.DataFrame):
+def plot_fraction_preferred_to_ref(df: pd.DataFrame, filename: str):
     """
     Creates a line plot to visualize the 'Fraction preferred to ref' for various 
     models given their parameters. The plot includes a reference line at y=0.5 
@@ -48,6 +50,8 @@ def plot_fraction_preferred_to_ref(df: pd.DataFrame):
     Parameters:
     df : pd.DataFrame
         Fraction preferrend to renference DataFrame.
+    filename : str
+        The filename to save the plot, including path.             
         
     Returns:
     None. The function directly creates a plot using matplotlib and seaborn.
@@ -91,10 +95,18 @@ def plot_fraction_preferred_to_ref(df: pd.DataFrame):
 
     # Position legend below x-axis
     plt.legend(loc="upper center", bbox_to_anchor=(0.5, -0.15), ncol=4)
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
     plt.show()
 
 
-def plot_metrics_by_algorithm_and_complexity(eval_summ_metrics, metrics):
+def plot_metrics_by_algorithm_and_complexity(eval_summ_metrics, metrics, filename):
     """
     Creates a figure with line plots to visualize each of the given metrics for 
     various summarization algorithms and complexities specified by the number of 
@@ -105,6 +117,8 @@ def plot_metrics_by_algorithm_and_complexity(eval_summ_metrics, metrics):
         EvalSummMetrics instance containing calculated metrics.
     metrics : list
         List of metrics to be plotted.
+    filename : str
+        The filename to save the plot, including path.        
 
     Returns:
     None. The function directly creates a plot using matplotlib and seaborn.
@@ -152,10 +166,18 @@ def plot_metrics_by_algorithm_and_complexity(eval_summ_metrics, metrics):
         ax.remove()
 
     plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
     plt.show()
 
 
-def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
+def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics, filename):
     """
     Creates a figure with line plots to visualize each of the given metrics for 
     various summarization algorithms and complexities specified by the fraction 
@@ -166,6 +188,8 @@ def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
         EvalSummMetrics instance containing calculated metrics.
     metrics : list
         List of metrics to be plotted.
+    filename : str
+        The filename to save the plot, including path.             
 
     Returns:
     None. The function directly creates a plot using matplotlib and seaborn.
@@ -187,7 +211,7 @@ def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
     # Sets
     sns.set_palette(sns.color_palette("tab10"))
     sns.set_style("darkgrid")
-    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2})
 
     # Plot each metric
     for ax, metric in zip(axs, metrics):
@@ -196,6 +220,7 @@ def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
             data=eval_summ_metrics.metrics_df,
             x="Fraction preferred to ref",
             y=metric,
+            color="black",
             linestyle=":",
             marker="o",
             markersize=7.5,
@@ -204,6 +229,14 @@ def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
             ax=ax,
         )
 
+        # Calculate correlation
+        corr, _ = scipy.stats.pearsonr(
+            eval_summ_metrics.metrics_df["Fraction preferred to ref"],
+            eval_summ_metrics.metrics_df[metric],
+        )
+
+        # Set title, labels
+        ax.set_title(f"Correlation: {corr:.2f}")
         ax.set_ylabel(metric)
         ax.set_xlabel("Fraction preferred to ref")
 
@@ -212,5 +245,83 @@ def plot_metrics_by_fraction_preferred_to_ref(eval_summ_metrics, metrics):
         ax.remove()
 
     plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
     plt.show()
+
+
+def visualize_correlation(
+    df_features, df_targets, target_variable, ax=None, filename=None
+):
+    """
+    Visualize correlation between features and target.
+
+    Parameters:
+    df_features : DataFrame
+        A DataFrame of feature variables.
+    df_targets : DataFrame
+        A DataFrame of target variables.
+    target_variable : str
+        The name of the target variable for correlation calculation.
+    ax : matplotlib.axes.Axes
+        The axes on which to draw the plot.  
+    filename : str
+        The filename to save the plot, including path.              
+    """
+
+    sns.set_style("darkgrid")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+
+    # Combine feature and target DataFrames
+    df = pd.concat([df_features.astype(float), df_targets.astype(float)], axis=1)
+
+    # Calculate correlation matrix
+    correlation_matrix = df.corr()
+
+    # Isolate target-feature correlations and transpose
+    target_feature_corr = correlation_matrix.loc[
+        df_targets.columns, df_features.columns
+    ].T
+
+    # Compute the correlation for each feature with target variable
+    overall_corr = target_feature_corr[target_variable]
+
+    # Sort the features based on these correlations
+    sorted_features = overall_corr.sort_values(ascending=False).index
+
+    # Apply the sorted features to the target-feature correlation matrix
+    sorted_target_feature_corr = target_feature_corr.loc[sorted_features]
+
+    # Create a figure if ax is None
+    if ax is None:
+        width_size = 2.25 * df_targets.shape[1]
+        fig, ax = plt.subplots(figsize=(width_size, 6))  # Change the size as necessary
+
+    sns.heatmap(
+        sorted_target_feature_corr,
+        annot=True,
+        cmap="vlag",
+        xticklabels=sorted_target_feature_corr.columns.values,
+        yticklabels=sorted_target_feature_corr.index.values,
+        ax=ax,
+    )
+
+    # Make the target variable label bold on the x-axis
+    labels = ax.get_xticklabels()  # get x labels
+    for label in labels:
+        if label.get_text() == target_variable:
+            label.set_weight("bold")  # set the target variable label to bold
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
 
