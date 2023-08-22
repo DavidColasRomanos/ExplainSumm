@@ -4,6 +4,7 @@ Data visualization module.
 """
 
 import os
+import shap
 import scipy.stats
 import pandas as pd
 
@@ -11,33 +12,74 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 
 
-def visualize_metrics(metrics_dict):
+def visualize_metrics(metrics_dicts, titles=None, filename=None):
     """
     Visualize classification metrics.
 
     Parameters:
-    metrics_dict : dict
-        A dictionary of various classification metrics.
+    metrics_dicts : list of dict
+        A list of dictionaries of various classification metrics.
+    titles : list of str, optional
+        A list of titles for the subplots.
+    filename : str, optional
+        Path to save the plot as an image file.
     """
 
-    # Print basic metrics
-    for key, value in metrics_dict.items():
-        if key != "Confusion Matrix" and key != "Classification Report":
-            print(f"{key}: {round(value * 100, 2)} %")
+    num_metrics = len(metrics_dicts)
+    fig, axes = plt.subplots(1, num_metrics, figsize=(6 * num_metrics, 6))
 
-    # Confusion matrix
-    plt.figure(figsize=(10, 8))
-    sns.heatmap(
-        metrics_dict["Confusion Matrix"],
-        annot=True,
-        fmt="d",
-        cmap="Blues",
-        cbar=True,
-        annot_kws={"size": 14},
-    )
-    plt.title("Confusion Matrix")
-    plt.xlabel("Predicted Label")
-    plt.ylabel("True Label")
+    # Ensure that axes is always a list, even when there's only one subplot
+    if num_metrics == 1:
+        axes = [axes]
+
+    # If titles are provided, ensure there's a title for each subplot
+    if titles and len(titles) != num_metrics:
+        raise ValueError("Number of titles must match the number of metrics_dicts")
+
+    for i, metrics_dict in enumerate(metrics_dicts):
+        ax = axes[i]
+
+        # Print basic metrics
+        print(f"{titles[i]}:")
+        for key, value in metrics_dict.items():
+            if key != "Confusion Matrix" and key != "Classification Report":
+                print(f"{key}: {round(value * 100, 2)} %")
+        print("\n")
+
+        # Convert the confusion matrix to percentage
+        confusion_matrix_percentage = (
+            metrics_dict["Confusion Matrix"]
+            / metrics_dict["Confusion Matrix"].sum()
+            * 100
+        )
+
+        # Confusion matrix
+        sns.heatmap(
+            confusion_matrix_percentage,
+            annot=True,
+            fmt=".2f",
+            cmap="Blues",
+            cbar=True,
+            annot_kws={"size": 14},
+            ax=ax,
+        )
+        # Set title from titles list or use default
+        title = (
+            f"{titles[i]} - Confusion Matrix (%)" if titles else "Confusion Matrix (%)"
+        )
+        ax.set_title(title)
+        ax.set_xlabel("Predicted Label")
+        ax.set_ylabel("True Label")
+
+    plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
     plt.show()
 
 
@@ -324,4 +366,203 @@ def visualize_correlation(
 
         # Save the figure
         plt.savefig(filename + ".png", bbox_inches="tight")
+
+
+def visualize_distributions(df, filename):
+    """
+    Visualize the distributions of the target variables.
+
+    Parameters:
+    df : DataFrame
+        A DataFrame of target variables.
+    filename : str
+        The filename to save the plot, including path.          
+
+    Returns:
+    Plot DataFrame distributions.
+    """
+
+    sns.set_style("darkgrid")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+
+    # Plotting the distributions of the variables
+    plt.figure(figsize=(15, 10))
+
+    for i, column in enumerate(df.columns, 1):
+        plt.subplot(2, 2, i)
+        sns.histplot(df[column], bins=6, kde=True)
+        plt.title(f"Distribution of {column}")
+        plt.xlabel(column)
+        plt.ylabel("Frequency")
+
+    plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
+    plt.show()
+
+
+def visualize_shap_values(shap_values_list, X_test_list, titles, filename=None):
+    """
+    Plot summary plots for multiple SHAP values.
+
+    Parameters:
+    shap_values_list : list of array-like
+        List of SHAP values for the instances to be plotted.
+    X_test_list : list of DataFrame
+        List of corresponding test data for the SHAP values.
+    titles : list of str
+        Titles for each of the subplots.
+    filename : str, optional
+        Path to save the plot as an image file.
+    """
+
+    sns.set_style("white")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 1.5})
+
+    if len(shap_values_list) > 1:
+
+        # Create a figure
+        plt.figure(figsize=(29, 12))
+
+        # Loop through the shap_values_list and X_test_list and plot
+        for i, (shap_values, X_test, title) in enumerate(
+            zip(shap_values_list, X_test_list, titles)
+        ):
+            plt.subplot(1, len(shap_values_list), i + 1)
+            shap.summary_plot(shap_values, X_test, plot_size=None, show=False)
+            plt.title(title)
+
+        plt.tight_layout()
+
+    else:
+        shap.plots.beeswarm(
+            shap_values_list[0], max_display=20, show=False, plot_size=(13, 12)
+        )
+        plt.title(titles[0])
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
+    plt.show()
+
+
+def visualize_shap_values_by_quality(models, labels=None, filename=None):
+    """
+    Visualize SHAP values by quality levels.
+
+    Parameters:
+    models : list
+        List of objects that have a dedicated attribute containing SHAP values
+        and an X_test attribute containing feature names.
+    labels : list of str, optional
+        Labels for each set of SHAP values. Default is ["low_quality", "mid_quality", "high_quality"].
+    filename : str, optional
+        Path to save the plot as an image file.
+
+    Returns:
+    shap_df : DataFrame
+        A DataFrame containing the mean absolute SHAP values for each feature 
+        across the provided models/quality levels.
+    """
+
+    sns.set_style("darkgrid")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 2.5})
+
+    if labels is None:
+        labels = ["low_quality", "mid_quality", "high_quality"]
+
+    shap_dfs = []
+    for model, label in zip(models, labels):
+        shap_values = (
+            pd.DataFrame(model.shap_values.values, columns=model.X_test.columns)
+            .abs()
+            .mean()
+            .rename(label)
+        )
+        shap_dfs.append(shap_values)
+
+    shap_df = pd.concat(shap_dfs, axis=1)
+
+    shap_df["mean"] = shap_df.mean(axis=1)
+    shap_df.sort_values("mean", inplace=True)
+    shap_df.drop("mean", axis=1, inplace=True)
+
+    # Plotting the mean abs shap values
+    shap_df.tail(20).plot(kind="barh", stacked=False, figsize=(15, 12))
+
+    plt.title("SHAP bar plot by Quality Level")
+    plt.xlabel("mean(|SHAP value|)")
+    plt.ylabel("Metric")
+    plt.xticks(rotation=90)
+    plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
+    plt.show()
+
+    return shap_df
+
+
+def plot_shap_dependence(metric, models, labels=None, filename=None):
+    """
+    Plot SHAP dependence plots for a given metric across multiple models.
+
+    Parameters:
+    metric : str
+        The metric for which SHAP dependence plot should be drawn.
+    models : list
+        List of objects that have a dedicated attribute containing SHAP values
+        and an X_test attribute containing feature names.
+    labels : list of str, optional
+        Labels for each set of SHAP values. Default is ["low_quality", "mid_quality", "high_quality"].
+    filename : str, optional
+        Path to save the plot as an image file.
+    """
+
+    sns.set_style("darkgrid")
+    sns.set_context("notebook", font_scale=1.2, rc={"lines.linewidth": 1.5})
+
+    if labels is None:
+        labels = ["low_quality", "mid_quality", "high_quality"]
+
+    fig, axes = plt.subplots(nrows=1, ncols=len(models), figsize=(22, 7))
+
+    for model, ax, label in zip(models, axes, labels):
+        shap.dependence_plot(
+            metric,
+            model.shap_values.values,
+            model.X_test,
+            ax=ax,
+            interaction_index=metric,
+            xmin="percentile(1)",
+            xmax="percentile(99)",
+            show=False,
+            title=label,
+        )
+
+    plt.tight_layout()
+
+    if filename:
+        # Check if the directory exists, if not, create it
+        os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+        # Save the figure
+        plt.savefig(filename + ".png", bbox_inches="tight")
+
+    plt.show()
 

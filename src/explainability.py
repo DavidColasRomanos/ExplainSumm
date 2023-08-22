@@ -3,6 +3,7 @@ Module for Explainable Artificial Intelligence.
 
 """
 
+import shap
 import optuna
 
 import numpy as np
@@ -12,6 +13,8 @@ from sklearn import metrics
 
 from src.models import OptunaObjective
 from src.utils import reduceMemory, train_test_split_comparision
+
+optuna.logging.set_verbosity(optuna.logging.WARNING)
 
 SEED = 108
 
@@ -60,6 +63,8 @@ class ExplainSumm:
         self.test_pred = None
         self.test_pred_prob = None
 
+        self.shap_values = None
+
         self.main()
 
     def main(self):
@@ -82,6 +87,9 @@ class ExplainSumm:
 
         # Predict
         self.predict()
+
+        # Shap values
+        self.shap_tree_explainer()
 
     def generate_spread_drift_features(self):
         """
@@ -259,3 +267,12 @@ class ExplainSumm:
         results["Confusion Matrix"] = cm
 
         return results
+
+    def shap_tree_explainer(self):
+        """
+        Shap values calculation from TreeExplainer.
+
+        """
+
+        explainer = shap.TreeExplainer(self.model)
+        self.shap_values = explainer(self.X_test)
